@@ -1,0 +1,117 @@
+const mongoose = require('mongoose')
+const https = require('https')
+const fs = require('fs')
+const config = require('../../config/config')
+
+const Store = mongoose.model('Store')
+
+// List all stores
+exports.findAll = (req, res) => {
+  Store.find({}, (err, results) => {
+    return res.send(results)
+  })
+}
+
+// Find store by Id
+exports.findById = (req, res) => {
+  let id = req.params.id
+  Store.findOne({id: id}, (err, result) => {
+    return res.send(result)
+  })
+}
+
+// Create a new store
+exports.add = (req, res) => {
+  Store.create(req.body, (err, coffeeshop) => {
+    if (err) return console.log(err)
+    return res.send(coffeeshop)
+  })
+}
+
+// Update a store with Id
+exports.update = (req, res) => {
+  let id = req.params.id
+  let updates = req.body
+
+  Store.update({id: id}, req.body, (err, numberAffected) => {
+      if (err) return console.log(err)
+      res.send(202)
+  })
+}
+
+// Delete a store by Id
+exports.delete = (req, res) => {
+  let id = req.params.id
+  Store.remove({id: id}, (result) => {
+    return res.send(result)
+  })
+}
+
+// Import stores from CSV file
+exports.import = (req, res) => {
+	let data = []
+	let category = ""
+	fs.readFile(req.query.file, (err, locations) => {
+		locations.toString().split('\n').forEach(location => {
+			data = location.split(',')
+			if (data[5] === undefined)
+				category = 'Coffee'
+			else
+				category = data[5]
+		  Store.create({id: data[0], name: data[1], address: data[2], latitude: data[3], longitude: data[4], category: category}, err => {
+		    if (err) return console.log(err)
+		  })
+		})
+	})
+	return res.send(202)
+}
+
+// Find the nearest store with a given address
+exports.findNearest = (req, res) => {
+	let lat = ''
+	let lng = ''
+	const apiKey = config.map.apiKey
+	const geoURL = config.map.url
+	const url = geoURL+'?address='+req.query.address+'&key='+apiKey
+	let shortest = Number.MAX_VALUE
+	let result = {}
+	let d = 0
+	let body = ''
+	https.get(url, res1 => {
+	  res1.setEncoding('utf8')
+	  res1.on('data', data => {
+	    body += data
+	  })
+	  res1.on('end', () => {
+	    body = JSON.parse(body)
+			lat = body.results[0].geometry.location.lat
+			lng = body.results[0].geometry.location.lng
+	    console.log(
+	      `Address: ${body.results[0].formatted_address} -`,
+	      `Latitude: ${body.results[0].geometry.location.lat} -`,
+	      `Longitude: ${body.results[0].geometry.location.lng}`
+	    )
+			// find the nearest store
+		  Store.find({}, (err, results) => {
+				results.forEach(r => {
+					d = distance(lat, lng, r.latitude, r.longitude)
+					if (d < shortest) {
+						shortest = d
+						result = r
+					}
+				})
+		    return res.send(result)
+		  })
+	  })
+	})
+}
+
+// Calculate the distance between the two latidue and longitude points
+function distance(lat1, lng1, lat2, lng2) {
+	let p = Math.PI / 180
+	let c = Math.cos
+	// Mean earth radius in miles
+	let rad = 3539
+	let a = 0.5 - c((lat2 - lat1) * p)/2 + c(lat1 * p) * c(lat2 * p) * (1 - c((lng2 - lng1) * p))/2
+	return 2*rad * Math.asin(Math.sqrt(a))
+}
